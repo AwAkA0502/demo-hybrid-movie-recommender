@@ -28,10 +28,10 @@ from sklearn.preprocessing import MinMaxScaler
 # ============================================================
 HF_REPO_ID = "AwAkAXxX/hybrid-movie-recommender-catboost"
 HF_MODEL_FILES = (
-    "models/preprocess_cache.pkl",
-    "models/cbf_cache.pkl",
-    "models/bpr_cache.pkl",
-    "models/yetirank_cache.pkl",
+    "models/preprocess_artifacts.pkl",
+    "models/cbf_artifacts.pkl",
+    "models/bpr_artifacts.pkl",
+    "models/yetirank_artifacts.pkl",
     "models/yetirank_model.cbm",
 )
 TOP_N_DEFAULT = 10
@@ -58,7 +58,7 @@ def restore_scaler(obj):
 
 
 # ============================================================
-# PEMUATAN ARTEFAK (cached — hanya dijalankan sekali per sesi server)
+# PEMUATAN ARTEFAK (disimpan di memori sesi — hanya sekali per server)
 # ============================================================
 @st.cache_resource(show_spinner="Mengunduh & memuat model hybrid dari HuggingFace Hub...")
 def load_artifacts():
@@ -67,13 +67,13 @@ def load_artifacts():
         name = Path(repo_path).name
         paths[name] = hf_hub_download(repo_id=HF_REPO_ID, filename=repo_path)
 
-    with open(paths["preprocess_cache.pkl"], "rb") as f:
+    with open(paths["preprocess_artifacts.pkl"], "rb") as f:
         pp = pickle.load(f)
-    with open(paths["cbf_cache.pkl"], "rb") as f:
+    with open(paths["cbf_artifacts.pkl"], "rb") as f:
         cbf = pickle.load(f)
-    with open(paths["bpr_cache.pkl"], "rb") as f:
+    with open(paths["bpr_artifacts.pkl"], "rb") as f:
         bpr = pickle.load(f)
-    with open(paths["yetirank_cache.pkl"], "rb") as f:
+    with open(paths["yetirank_artifacts.pkl"], "rb") as f:
         yr = pickle.load(f)
 
     ranker = CatBoostRanker()
@@ -85,7 +85,7 @@ def load_artifacts():
     mid2idx = cbf["mid2idx"]
     user_fav_idx = cbf["user_fav_idx"]
 
-    # Slim cache menyimpan faktor saja; full cache punya objek bpr_model.
+    # Artefak ringkas menyimpan faktor saja; artefak penuh punya objek bpr_model.
     if "bpr_model" in bpr:
         bpr_model = bpr["bpr_model"]
     else:
@@ -107,7 +107,7 @@ def load_artifacts():
         if ratings_train is None:
             st.error(
                 "movies_catalog tidak punya statistik item dan ratings_train "
-                "tidak tersedia di preprocess_cache.pkl (pakai versi slim)."
+                "tidak tersedia di preprocess_artifacts.pkl (pakai versi ringkas)."
             )
             st.stop()
         stats = ratings_train.groupby("movieId").agg(
