@@ -14,6 +14,7 @@ Cara pakai:
 
 import pickle
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -84,7 +85,14 @@ def load_artifacts():
     mid2idx = cbf["mid2idx"]
     user_fav_idx = cbf["user_fav_idx"]
 
-    bpr_model = bpr["bpr_model"]
+    # Slim cache menyimpan faktor saja; full cache punya objek bpr_model.
+    if "bpr_model" in bpr:
+        bpr_model = bpr["bpr_model"]
+    else:
+        bpr_model = SimpleNamespace(
+            user_factors=np.asarray(bpr["user_factors"], dtype=np.float32),
+            item_factors=np.asarray(bpr["item_factors"], dtype=np.float32),
+        )
     user2idx = bpr["user2idx"]
     movie2idx = bpr["movie2idx"]
     user_train_mid = bpr["user_train_mid"]
@@ -234,14 +242,20 @@ def main():
 
     art = load_artifacts()
     known_users = sorted(art["user2idx"].keys())
+    # Dropdown penuh 138k user membuat Streamlit Cloud OOM/crash — tampilkan sampel.
+    step = max(1, len(known_users) // 300)
+    sample_users = known_users[::step][:300]
 
     col1, col2 = st.columns([2, 1])
     with col1:
         uid = st.selectbox(
-            "Pilih User ID (dari data latih)",
-            options=known_users,
+            "Pilih User ID (sampel dari data latih)",
+            options=sample_users,
             index=0,
-            help=f"{len(known_users):,} pengguna tersedia dari data latih penelitian.",
+            help=(
+                f"Menampilkan {len(sample_users)} sampel dari "
+                f"{len(known_users):,} pengguna data latih (batas RAM demo Cloud)."
+            ),
         )
     with col2:
         top_n = st.slider("Jumlah rekomendasi (Top-N)", min_value=5, max_value=25, value=TOP_N_DEFAULT)
