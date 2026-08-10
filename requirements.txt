@@ -1,8 +1,7 @@
---prefer-binary
 streamlit==1.61.1
 pandas==3.0.5
 numpy==2.5.2
-scikit-learn==1.8.0
+scikit-learn==1.6.1
 implicit==0.7.3
 catboost==1.2.10
 huggingface_hub>=0.23.0
