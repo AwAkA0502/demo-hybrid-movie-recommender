@@ -1,0 +1,5 @@
+models/
+*.pkl
+*.cbm
+__pycache__/
+.DS_Store
