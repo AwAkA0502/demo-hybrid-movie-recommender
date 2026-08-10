@@ -20,6 +20,7 @@ import pandas as pd
 import streamlit as st
 from catboost import CatBoostRanker
 from huggingface_hub import hf_hub_download
+from sklearn.preprocessing import MinMaxScaler
 
 # ============================================================
 # KONFIGURASI
@@ -35,6 +36,24 @@ HF_MODEL_FILES = (
 TOP_N_DEFAULT = 10
 
 st.set_page_config(page_title="Rekomendasi Film Hybrid", page_icon="🎬", layout="wide")
+
+
+def restore_scaler(obj):
+    """Pulihkan MinMaxScaler dari objek sklearn ATAU dict parameter (anti beda versi)."""
+    if isinstance(obj, MinMaxScaler):
+        return obj
+    if isinstance(obj, dict) and obj.get("type") == "MinMaxScaler":
+        sc = MinMaxScaler(clip=bool(obj.get("clip", False)))
+        sc.data_min_ = np.asarray(obj["data_min_"])
+        sc.data_max_ = np.asarray(obj["data_max_"])
+        sc.scale_ = np.asarray(obj["scale_"])
+        sc.min_ = np.asarray(obj["min_"])
+        sc.n_features_in_ = int(obj["n_features_in_"])
+        sc.n_samples_seen_ = obj.get("n_samples_seen_", 0)
+        if obj.get("feature_names_in_") is not None:
+            sc.feature_names_in_ = np.asarray(obj["feature_names_in_"])
+        return sc
+    raise TypeError(f"Format scaler tidak dikenali: {type(obj)}")
 
 
 # ============================================================
@@ -70,7 +89,7 @@ def load_artifacts():
     movie2idx = bpr["movie2idx"]
     user_train_mid = bpr["user_train_mid"]
 
-    scaler = yr["scaler"]
+    scaler = restore_scaler(yr["scaler"])
     features = yr["features"]
     num_features = yr["num_features"]
 
