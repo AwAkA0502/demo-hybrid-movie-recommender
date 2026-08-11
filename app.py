@@ -228,6 +228,106 @@ def recommend_top_n(art, uid, top_n=10):
 # ============================================================
 # UI
 # ============================================================
+def render_score_guide():
+    """Penjelasan tetap tentang arti & cara hitung skor (bukan persen)."""
+    with st.expander("Cara membaca skor di tabel hasil", expanded=False):
+        st.markdown(
+            """
+**Alur perhitungan (untuk setiap film kandidat yang belum pernah dirating user):**
+
+1. **Skor CBF** — Content-Based Filtering  
+   - Film digambarkan lewat konten (judul/genre/tag → TF-IDF).  
+   - Dihitung *cosine similarity* antara film kandidat dan film favorit user.  
+   - Dipakai rata-rata **top-10** similarity (leave-one-out jika kandidat ikut di favorit).  
+   - Nilai dipotong ke rentang **0–1** (semakin tinggi = semakin mirip konten favorit user).  
+   - **Bukan persentase**; contoh `0.35` ≈ kesamaan relatif 0,35 pada skala 0–1.
+
+2. **Skor BPR** — Bayesian Personalized Ranking  
+   - Collaborative filtering dari pola rating banyak user.  
+   - Rumus inti: **dot product** faktor laten user × faktor laten item  
+     (`item_factors[item] · user_factors[user]`).  
+   - Skala **tidak dibatasi 0–1** (bisa > 1). Semakin tinggi = semakin cocok menurut pola kolaboratif.  
+   - **Bukan persentase**.
+
+3. **Skor Hybrid** — CatBoostRanker (YetiRank)  
+   - Fitur yang digabung: skor BPR, skor CBF, plus statistik film  
+     (`n_ratings_train`, `avg_rating_train`, `std_rating_train`, `release_year`, `n_genres`).  
+   - Fitur numerik dinormalisasi Min–Max (scaler hasil pelatihan).  
+   - Model YetiRank mengeluarkan **skor ranking** untuk mengurutkan kandidat.  
+   - **Bukan probabilitas / bukan persen** (mis. `7.45` ≠ 74,5%).  
+   - Film peringkat 1 = Skor Hybrid **tertinggi** di antara kandidat unseen user tersebut.
+
+**Ringkas:** urutan tabel mengikuti Skor Hybrid; CBF & BPR membantu menjelaskan kontribusi konten vs kolaboratif.
+            """
+        )
+
+
+def render_result_explanation(uid, top_n, recs):
+    """Jelaskan angka konkret pada baris Top-1 (dan ringkas Top-N)."""
+    top = recs.iloc[0]
+    title = top["title"]
+    hyb = float(top["score_hybrid"])
+    bpr = float(top["score_bpr"])
+    cbf = float(top["score_cbf"])
+
+    st.markdown("#### Ringkasan interpretasi hasil")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Skor Hybrid (peringkat 1)", f"{hyb:.4f}")
+    c2.metric("Skor BPR", f"{bpr:.4f}")
+    c3.metric("Skor CBF", f"{cbf:.4f}")
+
+    st.success(
+        f"**Peringkat 1 — {title}** dianggap paling relevan untuk User **{uid}** "
+        f"karena memiliki Skor Hybrid tertinggi ({hyb:.4f}) di antara kandidat Top-{top_n}."
+    )
+
+    st.markdown(
+        f"""
+**Penjelasan angka pada film peringkat 1:**
+
+- **Skor CBF = {cbf:.4f}**  
+  Kesamaan konten film ini terhadap profil favorit user, dihitung dari rata-rata
+  top-10 *cosine similarity* (skala 0–1). Nilai {cbf:.4f} berarti kemiripan konten
+  relatif sedang–tinggi, **bukan** “{cbf * 100:.1f}% kepastian suka”.
+
+- **Skor BPR = {bpr:.4f}**  
+  Kecocokan kolaboratif dari faktor laten BPR (dot product user–item).
+  Nilai {bpr:.4f} lebih tinggi dari banyak kandidat lain biasanya menandakan
+  pola preferensi user mirip dengan user lain yang menyukai film sejenis.
+  Ini **bukan** persen.
+
+- **Skor Hybrid = {hyb:.4f}**  
+  Keluaran CatBoostRanker (YetiRank) setelah menggabungkan BPR, CBF, dan
+  fitur statistik film. Angka ini dipakai **hanya untuk mengurutkan**;
+  `{hyb:.4f}` **bukan** persentase (jangan dibaca sebagai {hyb:.0f}% atau sejenisnya).
+  Yang penting: Hybrid peringkat 1 ≥ Hybrid peringkat 2 ≥ … ≥ Hybrid peringkat {top_n}.
+
+**Cara membaca seluruh tabel:** bandingkan antar baris. Selisih skor menunjukkan
+prioritas ranking model, bukan selisih “persen ketertarikan”.
+        """
+    )
+
+    with st.expander("Detail fitur yang masuk ke model Hybrid"):
+        st.markdown(
+            """
+Untuk setiap film kandidat, vektor fitur yang diprediksi YetiRank meliputi:
+
+| Fitur | Asal |
+|---|---|
+| `bpr_score` | Skor BPR (dot product faktor laten) |
+| `user_cbf_score` | Skor CBF (rata-rata top-10 cosine similarity) |
+| `n_ratings_train` | Jumlah rating film pada data latih |
+| `avg_rating_train` | Rata-rata rating film pada data latih |
+| `std_rating_train` | Simpangan baku rating film |
+| `release_year` | Tahun rilis film |
+| `n_genres` | Jumlah genre film |
+
+Fitur numerik ditransformasi Min–Max memakai parameter scaler hasil pelatihan,
+lalu `CatBoostRanker.predict()` menghasilkan Skor Hybrid.
+            """
+        )
+
+
 def main():
     st.title("🎬 Demo Sistem Rekomendasi Film Hybrid")
     st.caption(
@@ -239,6 +339,8 @@ def main():
         "Bukan layanan produksi — lihat Bab 3 subbab Deployment untuk cakupan penelitian.",
         icon="ℹ️",
     )
+
+    render_score_guide()
 
     art = load_artifacts()
     known_users = sorted(art["user2idx"].keys())
@@ -278,6 +380,12 @@ def main():
             ),
             use_container_width=True,
         )
+        st.caption(
+            "Urutan baris = prioritas rekomendasi (Skor Hybrid menurun). "
+            "Skor Hybrid/BPR/CBF bukan persentase."
+        )
+
+        render_result_explanation(uid, top_n, recs)
 
         with st.expander("Lihat riwayat rating pengguna ini (data latih)"):
             seen = art["user_train_mid"].get(int(uid), set())
