@@ -210,15 +210,19 @@ def recommend_top_n(art, uid, top_n=10):
     mf["bpr_score"] = bpr_s
     mf["user_cbf_score"] = cbf_s
 
-    X = mf[art["features"]].fillna(0)
+    feature_cols = list(art["features"])
+    X = mf[feature_cols].fillna(0)
     Xs = X.copy()
     Xs[art["num_features"]] = art["scaler"].transform(X[art["num_features"]])
     hyb_score = art["ranker"].predict(Xs)
 
-    result = mf[["movieId"]].copy()
+    result = mf[["movieId"] + feature_cols].copy()
     result["score_hybrid"] = hyb_score
     result["score_bpr"] = bpr_s
     result["score_cbf"] = cbf_s
+    # Simpan juga fitur setelah MinMax (bahan langsung ke predict)
+    for col in feature_cols:
+        result[f"{col}__scaled"] = Xs[col].values
     result = result.merge(
         art["movies_catalog"][["movieId", "title", "genres"]], on="movieId", how="left"
     )
@@ -262,7 +266,7 @@ def render_score_guide():
         )
 
 
-def render_result_explanation(uid, top_n, recs):
+def render_result_explanation(uid, top_n, recs, feature_cols):
     """Jelaskan angka konkret pada baris Top-1 (dan ringkas Top-N)."""
     top = recs.iloc[0]
     title = top["title"]
@@ -305,6 +309,55 @@ def render_result_explanation(uid, top_n, recs):
 **Cara membaca seluruh tabel:** bandingkan antar baris. Selisih skor menunjukkan
 prioritas ranking model, bukan selisih “persen ketertarikan”.
         """
+    )
+
+    feature_labels = {
+        "bpr_score": "Skor BPR (dot product faktor laten)",
+        "user_cbf_score": "Skor CBF (rata-rata top-10 cosine similarity)",
+        "n_ratings_train": "Jumlah rating film pada data latih",
+        "avg_rating_train": "Rata-rata rating film pada data latih",
+        "std_rating_train": "Simpangan baku rating film",
+        "release_year": "Tahun rilis film",
+        "n_genres": "Jumlah genre film",
+    }
+
+    rows = []
+    for col in feature_cols:
+        raw = float(top[col])
+        scaled_col = f"{col}__scaled"
+        scaled = float(top[scaled_col]) if scaled_col in top.index else float("nan")
+        rows.append(
+            {
+                "Fitur": col,
+                "Arti": feature_labels.get(col, col),
+                "Nilai mentah": raw,
+                "Setelah MinMax": scaled,
+            }
+        )
+    feat_df = pd.DataFrame(rows)
+
+    st.markdown("#### Dari mana angka Hybrid dihitung?")
+    st.markdown(
+        f"""
+Untuk **{title}**, model **tidak** menghitung Hybrid sebagai `BPR + CBF`.
+Alurnya:
+
+```text
+7 fitur mentah  →  MinMaxScaler  →  CatBoostRanker.predict(...)  →  Skor Hybrid = {hyb:.4f}
+```
+
+Tabel di bawah adalah **bahan input** yang masuk ke `predict()` untuk film peringkat 1.
+        """
+    )
+    st.dataframe(
+        feat_df.style.format({"Nilai mentah": "{:.4f}", "Setelah MinMax": "{:.6f}"}),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption(
+        "Kolom “Setelah MinMax” = nilai yang benar-benar diterima pohon YetiRank. "
+        f"Skor Hybrid {hyb:.4f} adalah keluaran ensemble pohon atas vektor tersebut "
+        "(bukan penjumlahan manual fitur)."
     )
 
     with st.expander("Detail fitur yang masuk ke model Hybrid"):
@@ -385,7 +438,7 @@ def main():
             "Skor Hybrid/BPR/CBF bukan persentase."
         )
 
-        render_result_explanation(uid, top_n, recs)
+        render_result_explanation(uid, top_n, recs, feature_cols=art["features"])
 
         with st.expander("Lihat riwayat rating pengguna ini (data latih)"):
             seen = art["user_train_mid"].get(int(uid), set())
